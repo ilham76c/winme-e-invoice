@@ -17,6 +17,18 @@ const router = createRouter({
       // which is lazy-loaded when the route is visited.
       component: () => import('../views/AboutView.vue'),
     },
+    {
+      path: '/invoices',
+      name: 'invoices',
+      meta: { hideNav: true },
+      component: () => import('../views/InvoiceListView.vue'),
+    },
+    {
+      path: '/invoices/new',
+      name: 'invoice-create',
+      meta: { hideNav: true },
+      component: () => import('../views/CreateInvoiceView.vue'),
+    },
   ],
 })
 
