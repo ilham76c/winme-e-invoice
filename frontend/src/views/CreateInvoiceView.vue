@@ -6,6 +6,7 @@ import FormField from '../components/FormField.vue'
 import InvoiceItemsSection from '../components/InvoiceItemsSection.vue'
 import InvoiceSettingsSection from '../components/InvoiceSettingsSection.vue'
 import InvoicePreview from '../components/InvoicePreview.vue'
+import InvoiceSuccessModal from '../components/InvoiceSuccessModal.vue'
 import { paymentMethods } from '../constants/paymentMethods'
 import { addDays, toISODate } from '../utils/format'
 
@@ -42,6 +43,8 @@ const errors = reactive({
   methods: '',
 })
 const submitting = ref(false)
+const showSuccess = ref(false)
+const invoiceUrl = ref('')
 
 const firstChannel = computed(
   () => paymentMethods.find((m) => methods.value.includes(m.id))?.label ?? '',
@@ -84,7 +87,9 @@ async function submit() {
   if (!validate()) {
     // gulir ke pesan error pertama
     await Promise.resolve()
-    document.querySelector('[role="alert"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    document
+      .querySelector('[role="alert"]')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     return
   }
   submitting.value = true
@@ -97,10 +102,24 @@ async function submit() {
       methods: methods.value,
     }
     console.log('Buat E-Invoice', payload) // TODO: kirim ke API
-    router.push({ name: 'invoices' })
-  } finally {
+
+    // TODO: ganti dengan link yang dikembalikan API setelah invoice dibuat
+    const slug =
+      form.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '')
+        .slice(0, 20) || 'invoice'
+    invoiceUrl.value = `https://winme.id/${slug}${Math.random().toString(36).slice(2, 7)}`
+    showSuccess.value = true
+  } catch (err) {
     submitting.value = false
+    throw err
   }
+}
+
+function closeSuccess() {
+  showSuccess.value = false
+  router.push({ name: 'invoices' })
 }
 </script>
 
@@ -115,7 +134,9 @@ async function submit() {
 
     <form class="space-y-5 px-4 pt-6" novalidate @submit.prevent="submit">
       <!-- Info panduan -->
-      <div class="flex items-center gap-2.5 rounded-full bg-brand-100 px-4 py-3 text-sm text-slate-800">
+      <div
+        class="flex items-center gap-2.5 rounded-full bg-brand-100 px-4 py-3 text-sm text-slate-800"
+      >
         <AppIcon name="info" :size="20" class="shrink-0 text-brand-500" />
         <p>
           Lihat panduan E-Invoice
@@ -221,5 +242,7 @@ async function submit() {
         Buat E-Invoice
       </button>
     </form>
+
+    <InvoiceSuccessModal v-if="showSuccess" :url="invoiceUrl" @close="closeSuccess" />
   </div>
 </template>
