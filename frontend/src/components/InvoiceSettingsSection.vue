@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
+import { formatDate } from '../utils/format'
 
 const expiry = defineModel('expiry', { type: String, default: '' })
 const methodId = defineModel('methodId', { type: Number, default: null })
@@ -15,6 +16,14 @@ const props = defineProps({
   loadError: { type: String, default: '' },
 })
 const emit = defineEmits(['retry'])
+
+function openPicker(e) {
+  try {
+    e.target.showPicker?.()
+  } catch {
+    // picker sudah terbuka atau tidak didukung; abaikan
+  }
+}
 
 // Tombol "Lihat Semua Metode" hanya relevan bila metode lebih banyak dari yang ditampilkan awal
 const PREVIEW_COUNT = 8
@@ -37,7 +46,15 @@ const visibleOptions = computed(() =>
       </label>
       <p class="mt-0.5 mb-2 text-xs text-slate-400">Pilih batas waktu invoice aktif (maks. 30 hari)</p>
 
-      <div class="relative">
+      <div
+        class="relative flex items-center justify-between rounded-xl border bg-white px-4 py-3.5 text-[15px] focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-200"
+        :class="expiryError ? 'border-red-500' : 'border-slate-300'"
+      >
+        <!-- Tampilan DD-MM-YYYY; input tanggal asli ada di atasnya (transparan) untuk membuka kalender -->
+        <span :class="expiry ? 'text-slate-900' : 'text-slate-400'" aria-hidden="true">
+          {{ formatDate(expiry) || 'DD-MM-YYYY' }}
+        </span>
+        <AppIcon name="calendar" :size="24" class="text-slate-900" />
         <input
           id="expiry"
           v-model="expiry"
@@ -45,12 +62,8 @@ const visibleOptions = computed(() =>
           :min="min"
           :max="max"
           :aria-invalid="!!expiryError"
-          class="w-full appearance-none rounded-xl border border-slate-300 bg-white px-4 py-3.5 text-[15px] text-slate-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-200 aria-invalid:border-red-500 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-0"
-        />
-        <AppIcon
-          name="calendar"
-          :size="24"
-          class="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2 text-slate-900"
+          class="absolute inset-0 h-full w-full cursor-pointer opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+          @click="openPicker"
         />
       </div>
       <p v-if="expiryError" class="mt-1.5 text-xs text-red-600" role="alert">{{ expiryError }}</p>

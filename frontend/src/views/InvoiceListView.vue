@@ -1,24 +1,20 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AppIcon from '../components/AppIcon.vue'
 import InvoiceStatCard from '../components/InvoiceStatCard.vue'
 import InvoiceCard from '../components/InvoiceCard.vue'
 import InvoiceEmptyState from '../components/InvoiceEmptyState.vue'
+import { getInvoices } from '../services/invoiceService'
+import { toISODate } from '../utils/format'
 
 const router = useRouter()
 
-const invoices = ref([
-  {
-    id: 1,
-    name: 'INV-NamaTujuan',
-    amount: 250000,
-    number: 'INV-20260424-2414',
-    status: 'unpaid',
-    date: '2026-04-24',
-    demo: true,
-  },
-])
+const invoices = ref([])
+const pagination = ref({ page: 1, lastPage: 1, total: 0 })
+const loading = ref(true)
+const loadingMore = ref(false)
+const loadError = ref('')
 
 const search = ref('')
 const sort = ref('newest')
@@ -27,23 +23,72 @@ const dateType = ref('text')
 
 const rupiah = (n) => new Intl.NumberFormat('id-ID').format(n)
 
-const visibleInvoices = computed(() => {
-  const q = search.value.trim().toLowerCase()
-  return invoices.value
-    .filter((i) => !q || i.name.toLowerCase().includes(q) || i.number.toLowerCase().includes(q))
-    .filter((i) => !dateFilter.value || i.date === dateFilter.value)
-    .toSorted((a, b) =>
-      sort.value === 'newest' ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date),
-    )
+// --- Ambil data dari server
+let controller
+async function load(page = 1) {
+  controller?.abort() // batalkan request sebelumnya (mis. saat mengetik cepat)
+  controller = new AbortController()
+  const { signal } = controller
+
+  if (page === 1) loading.value = true
+  else loadingMore.value = true
+  loadError.value = ''
+
+  try {
+    const res = await getInvoices({ search: search.value.trim(), page, signal })
+    invoices.value = page === 1 ? res.items : [...invoices.value, ...res.items]
+    pagination.value = res.pagination
+  } catch (err) {
+    if (err?.name === 'AbortError') return
+    loadError.value = 'Gagal memuat daftar invoice. Periksa koneksi lalu coba lagi.'
+  } finally {
+    if (!signal.aborted) {
+      loading.value = false
+      loadingMore.value = false
+    }
+  }
+}
+
+// Pencarian dikirim ke server setelah pengguna berhenti mengetik
+let searchTimer
+watch(search, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => load(1), 300)
 })
 
+onMounted(() => load(1))
+onBeforeUnmount(() => {
+  clearTimeout(searchTimer)
+  controller?.abort()
+})
+
+// --- Tampilan
+const visibleInvoices = computed(() =>
+  invoices.value
+    .filter((i) => !dateFilter.value || toISODate(new Date(i.createdAt)) === dateFilter.value)
+    .toSorted((a, b) =>
+      sort.value === 'newest'
+        ? Date.parse(b.createdAt) - Date.parse(a.createdAt)
+        : Date.parse(a.createdAt) - Date.parse(b.createdAt),
+    ),
+)
+
+const hasMore = computed(() => pagination.value.page < pagination.value.lastPage)
+
+// Belum ada invoice sama sekali (bukan hasil pencarian kosong)
+const isEmpty = computed(
+  () => !loading.value && !loadError.value && !invoices.value.length && !search.value.trim(),
+)
+const noMatch = computed(
+  () => !loading.value && !loadError.value && !visibleInvoices.value.length && !isEmpty.value,
+)
+
+// Ringkasan dihitung dari invoice yang sudah dimuat
 const paid = computed(() => invoices.value.filter((i) => i.status === 'paid'))
 const paidCount = computed(() => (paid.value.length ? String(paid.value.length) : '–'))
 const paidTotal = computed(() =>
   paid.value.length ? rupiah(paid.value.reduce((sum, i) => sum + i.amount, 0)) : '–',
 )
-
-const hasRealInvoices = computed(() => invoices.value.some((i) => !i.demo))
 
 function createInvoice() {
   router.push({ name: 'invoice-create' })
@@ -51,7 +96,6 @@ function createInvoice() {
 
 function showDatePicker(e) {
   dateType.value = 'date'
-  // beri waktu browser mengganti tipe input sebelum membuka picker
   requestAnimationFrame(() => e.target.showPicker?.())
 }
 
@@ -153,18 +197,47 @@ function hideDatePicker() {
           </button>
         </div>
 
-        <ul class="space-y-3">
-          <li v-for="invoice in visibleInvoices" :key="invoice.id">
-            <InvoiceCard :invoice="invoice" />
-          </li>
-        </ul>
+        <!-- Memuat -->
+        <div v-if="loading" class="space-y-3" aria-busy="true" aria-label="Memuat daftar invoice">
+          <div v-for="n in 3" :key="n" class="h-27 animate-pulse rounded-xl bg-brand-100"></div>
+        </div>
 
-        <p v-if="!visibleInvoices.length" class="py-6 text-center text-sm text-slate-500">
-          Tidak ada invoice yang cocok dengan pencarianmu.
-        </p>
+        <!-- Gagal -->
+        <div
+          v-else-if="loadError"
+          class="flex items-center justify-between gap-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700"
+          role="alert"
+        >
+          <span>{{ loadError }}</span>
+          <button type="button" class="shrink-0 font-semibold underline" @click="load(1)">
+            Coba lagi
+          </button>
+        </div>
+
+        <template v-else>
+          <ul class="space-y-3">
+            <li v-for="invoice in visibleInvoices" :key="invoice.id">
+              <InvoiceCard :invoice="invoice" />
+            </li>
+          </ul>
+
+          <p v-if="noMatch" class="py-6 text-center text-sm text-slate-500">
+            Tidak ada invoice yang cocok dengan pencarian atau tanggal yang dipilih.
+          </p>
+
+          <button
+            v-if="hasMore"
+            type="button"
+            :disabled="loadingMore"
+            class="w-full rounded-xl border border-brand-500 py-3 text-sm font-semibold text-brand-600 transition active:scale-[0.99] disabled:opacity-60"
+            @click="load(pagination.page + 1)"
+          >
+            {{ loadingMore ? 'Memuat…' : 'Muat lebih banyak' }}
+          </button>
+        </template>
       </section>
 
-      <InvoiceEmptyState v-if="!hasRealInvoices" @create="createInvoice" />
+      <InvoiceEmptyState v-if="isEmpty" @create="createInvoice" />
     </main>
   </div>
 </template>

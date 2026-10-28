@@ -25,7 +25,7 @@ function openVerification() {
 </script>
 
 <template>
-  <main class="pb-28">
+  <main>
     <AppHeader />
 
     <div class="space-y-4 px-4">

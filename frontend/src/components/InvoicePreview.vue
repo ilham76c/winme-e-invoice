@@ -10,13 +10,11 @@ const props = defineProps({
   merchant: { type: Object, required: true },
 })
 
-// Bila belum ada produk, tampilkan contoh agar pratinjau tidak kosong
-const sampleItems = [
-  { id: 's1', name: 'Pembuatan Website', qty: 1, price: 600000 },
-  { id: 's2', name: 'Fitur Menu', qty: 5, price: 100000 },
-]
-const rows = computed(() => (props.items.length ? props.items : sampleItems))
-const total = computed(() => rows.value.reduce((sum, i) => sum + i.qty * i.price, 0))
+const total = computed(() => props.items.reduce((sum, i) => sum + i.qty * i.price, 0))
+
+// TODO: ambil dari backend bila ada biaya layanan per metode pembayaran
+const serviceFee = 0
+const grandTotal = computed(() => total.value + serviceFee)
 
 const billTo = computed(() => {
   const c = props.customer
@@ -47,8 +45,8 @@ const billTo = computed(() => {
         </div>
         <div class="shrink-0 space-y-0.5 text-right">
           <p>No Invoice : ********</p>
-          <p>Due Date : {{ formatDate(expiry) }}</p>
-          <p>Via : Virtual Account</p>
+          <p>Due Date : {{ formatDate(expiry) || '-' }}</p>
+          <p>Via : {{ channel || '-' }}</p>
         </div>
       </div>
 
@@ -62,7 +60,10 @@ const billTo = computed(() => {
           </tr>
         </thead>
         <tbody class="bg-brand-50">
-          <tr v-for="r in rows" :key="r.id">
+          <tr v-if="!items.length">
+            <td colspan="4" class="py-4 text-center text-slate-400">Belum ada produk</td>
+          </tr>
+          <tr v-for="r in items" :key="r.id">
             <td class="py-3 text-center">{{ r.qty }}</td>
             <td class="px-2 py-3 break-words">{{ r.name }}</td>
             <td class="px-1 py-3 text-right">{{ rupiah(r.price) }}</td>
@@ -79,11 +80,11 @@ const billTo = computed(() => {
       <div class="mt-5 grid grid-cols-2 gap-3 text-xs">
         <div class="space-y-0.5">
           <p>Pembayaran Via :</p>
-          <p>Channel : {{ channel ? channel.toUpperCase() : '-' }}</p>
+          <p>Channel : {{ channel || '-' }}</p>
           <p>No Va : ********</p>
-          <p>Nominal : Rp0</p>
-          <p>Biaya Layanan: Rp0</p>
-          <p>Total : Rp0</p>
+          <p>Nominal : {{ rupiah(total) }}</p>
+          <p>Biaya Layanan: {{ rupiah(serviceFee) }}</p>
+          <p>Total : {{ rupiah(grandTotal) }}</p>
         </div>
         <div class="min-w-0 space-y-0.5 break-words">
           <p class="font-bold">{{ merchant.name }}</p>
