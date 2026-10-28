@@ -1,19 +1,51 @@
 <script setup>
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppIcon from '../components/AppIcon.vue'
 import FormField from '../components/FormField.vue'
+import InvoiceItemsSection from '../components/InvoiceItemsSection.vue'
+import InvoiceSettingsSection from '../components/InvoiceSettingsSection.vue'
+import InvoicePreview from '../components/InvoicePreview.vue'
+import { paymentMethods } from '../constants/paymentMethods'
+import { addDays, toISODate } from '../utils/format'
 
 const router = useRouter()
 
-const form = reactive({
+// TODO: ambil dari profil merchant yang sedang login
+const merchant = {
+  name: 'Dhanidan',
+  contact: 'Yusuf Adhani',
+  phone: '6281375198725',
+  email: 'Yusufadhani.bs@gmail.com',
+}
+
+// --- Informasi tujuan
+const form = reactive({ name: '', whatsapp: '', email: '', address: '' })
+
+// --- Detail tagihan
+const billingMode = ref('custom')
+const items = ref([])
+
+// --- Pengaturan
+const today = new Date()
+const minExpiry = toISODate(today)
+const maxExpiry = toISODate(addDays(today, 30))
+const expiry = ref(toISODate(addDays(today, 7)))
+const methods = ref([])
+
+const errors = reactive({
   name: '',
   whatsapp: '',
   email: '',
-  address: '',
+  items: '',
+  expiry: '',
+  methods: '',
 })
-const errors = reactive({ name: '', whatsapp: '', email: '' })
 const submitting = ref(false)
+
+const firstChannel = computed(
+  () => paymentMethods.find((m) => methods.value.includes(m.id))?.label ?? '',
+)
 
 const inputClass =
   'w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 text-[15px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-200 aria-invalid:border-red-500 aria-invalid:ring-red-100'
@@ -32,7 +64,16 @@ function validate() {
     errors.email = 'Format email belum benar, contoh nama@email.com.'
   else errors.email = ''
 
-  return !errors.name && !errors.whatsapp && !errors.email
+  errors.items = items.value.length ? '' : 'Tambahkan minimal satu produk atau jasa.'
+
+  if (!expiry.value) errors.expiry = 'Masa berlaku wajib diisi.'
+  else if (expiry.value < minExpiry || expiry.value > maxExpiry)
+    errors.expiry = 'Masa berlaku maksimal 30 hari dari hari ini.'
+  else errors.expiry = ''
+
+  errors.methods = methods.value.length ? '' : 'Pilih minimal satu metode pembayaran.'
+
+  return Object.values(errors).every((e) => !e)
 }
 
 function pickCustomer() {
@@ -40,10 +81,22 @@ function pickCustomer() {
 }
 
 async function submit() {
-  if (!validate()) return
+  if (!validate()) {
+    // gulir ke pesan error pertama
+    await Promise.resolve()
+    document.querySelector('[role="alert"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    return
+  }
   submitting.value = true
   try {
-    // TODO: kirim form ke API, atau lanjut ke langkah detail tagihan
+    const payload = {
+      customer: { ...form },
+      mode: billingMode.value,
+      items: items.value,
+      expiry: expiry.value,
+      methods: methods.value,
+    }
+    console.log('Buat E-Invoice', payload) // TODO: kirim ke API
     router.push({ name: 'invoices' })
   } finally {
     submitting.value = false
@@ -60,11 +113,9 @@ async function submit() {
       <h1 class="text-xl font-bold text-slate-900">Buat E-Invoice</h1>
     </header>
 
-    <main class="space-y-5 px-4 pt-6">
+    <form class="space-y-5 px-4 pt-6" novalidate @submit.prevent="submit">
       <!-- Info panduan -->
-      <div
-        class="flex items-center gap-2.5 rounded-full bg-brand-100 px-4 py-3 text-sm text-slate-800"
-      >
+      <div class="flex items-center gap-2.5 rounded-full bg-brand-100 px-4 py-3 text-sm text-slate-800">
         <AppIcon name="info" :size="20" class="shrink-0 text-brand-500" />
         <p>
           Lihat panduan E-Invoice
@@ -73,11 +124,7 @@ async function submit() {
       </div>
 
       <!-- Informasi Tujuan -->
-      <form
-        class="space-y-5 rounded-2xl bg-white p-4 shadow-md shadow-slate-300/60"
-        novalidate
-        @submit.prevent="submit"
-      >
+      <section class="space-y-5 rounded-2xl bg-white p-4 shadow-md shadow-slate-300/60">
         <div>
           <h2 class="text-xl font-bold text-brand-500">Informasi Tujuan</h2>
           <p class="mt-1 text-sm text-slate-800">Data penerima E-Invoice</p>
@@ -142,15 +189,37 @@ async function submit() {
             :class="inputClass"
           />
         </FormField>
+      </section>
 
-        <button
-          type="submit"
-          :disabled="submitting"
-          class="w-full rounded-xl bg-brand-500 py-3.5 text-[15px] font-semibold text-white shadow-sm transition active:scale-[0.99] disabled:opacity-60"
-        >
-          Lanjutkan
-        </button>
-      </form>
-    </main>
+      <!-- Detail Tagihan -->
+      <InvoiceItemsSection v-model:items="items" v-model:mode="billingMode" :error="errors.items" />
+
+      <!-- Pengaturan E-Invoice -->
+      <InvoiceSettingsSection
+        v-model:expiry="expiry"
+        v-model:methods="methods"
+        :min="minExpiry"
+        :max="maxExpiry"
+        :expiry-error="errors.expiry"
+        :methods-error="errors.methods"
+      />
+
+      <!-- Pratinjau -->
+      <InvoicePreview
+        :customer="form"
+        :items="items"
+        :expiry="expiry"
+        :channel="firstChannel"
+        :merchant="merchant"
+      />
+
+      <button
+        type="submit"
+        :disabled="submitting"
+        class="w-full rounded-2xl bg-brand-500 py-5 text-xl font-semibold text-white shadow-sm transition active:scale-[0.99] disabled:opacity-60"
+      >
+        Buat E-Invoice
+      </button>
+    </form>
   </div>
 </template>
