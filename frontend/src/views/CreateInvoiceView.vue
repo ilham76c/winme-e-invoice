@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppIcon from '../components/AppIcon.vue'
 import FormField from '../components/FormField.vue'
@@ -7,8 +7,10 @@ import InvoiceItemsSection from '../components/InvoiceItemsSection.vue'
 import InvoiceSettingsSection from '../components/InvoiceSettingsSection.vue'
 import InvoicePreview from '../components/InvoicePreview.vue'
 import InvoiceSuccessModal from '../components/InvoiceSuccessModal.vue'
-import { paymentMethods } from '../constants/paymentMethods'
 import { addDays, toISODate } from '../utils/format'
+import { createInvoice } from '../services/invoiceService'
+import { getPaymentMethods } from '../services/paymentMethodService'
+import { ApiError } from '../services/api'
 
 const router = useRouter()
 
@@ -32,23 +34,40 @@ const today = new Date()
 const minExpiry = toISODate(today)
 const maxExpiry = toISODate(addDays(today, 30))
 const expiry = ref(toISODate(addDays(today, 7)))
-const methods = ref([])
+const methodId = ref(null)
+const paymentMethods = ref([])
+const methodsLoading = ref(true)
+const methodsLoadError = ref('')
+
+async function loadPaymentMethods() {
+  methodsLoading.value = true
+  methodsLoadError.value = ''
+  try {
+    paymentMethods.value = await getPaymentMethods()
+  } catch {
+    methodsLoadError.value = 'Gagal memuat metode pembayaran.'
+  } finally {
+    methodsLoading.value = false
+  }
+}
+
+onMounted(loadPaymentMethods)
 
 const errors = reactive({
   name: '',
   whatsapp: '',
   email: '',
+  address: '',
   items: '',
   expiry: '',
   methods: '',
 })
 const submitting = ref(false)
+const submitError = ref('')
 const showSuccess = ref(false)
 const invoiceUrl = ref('')
 
-const firstChannel = computed(
-  () => paymentMethods.find((m) => methods.value.includes(m.id))?.label ?? '',
-)
+const channel = computed(() => paymentMethods.value.find((m) => m.id === methodId.value)?.name ?? '')
 
 const inputClass =
   'w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 text-[15px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-200 aria-invalid:border-red-500 aria-invalid:ring-red-100'
@@ -74,7 +93,7 @@ function validate() {
     errors.expiry = 'Masa berlaku maksimal 30 hari dari hari ini.'
   else errors.expiry = ''
 
-  errors.methods = methods.value.length ? '' : 'Pilih minimal satu metode pembayaran.'
+  errors.methods = methodId.value ? '' : 'Pilih metode pembayaran.'
 
   return Object.values(errors).every((e) => !e)
 }
@@ -83,37 +102,63 @@ function pickCustomer() {
   // TODO: buka daftar pelanggan, lalu isi form.name / whatsapp / email / address
 }
 
+const serverFieldMap = {
+  recipient_name: 'name',
+  whatsapp: 'whatsapp',
+  email: 'email',
+  address: 'address',
+  payment_method_id: 'methods',
+  expires_at: 'expiry',
+}
+
+// Menampilkan error validasi dari backend ({ field: ['pesan'] }) di field terkait
+function applyServerErrors(fieldErrors) {
+  let applied = false
+  for (const [field, raw] of Object.entries(fieldErrors)) {
+    const text = Array.isArray(raw) ? raw[0] : String(raw)
+    if (serverFieldMap[field]) errors[serverFieldMap[field]] = text
+    else if (field === 'items' || field.startsWith('items.')) errors.items ||= text
+    else continue
+    applied = true
+  }
+  return applied
+}
+
+function scrollToFirstError() {
+  nextTick(() => {
+    document.querySelector('[role="alert"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+}
+
 async function submit() {
+  submitError.value = ''
+  errors.address = ''
+
   if (!validate()) {
-    // gulir ke pesan error pertama
-    await Promise.resolve()
-    document
-      .querySelector('[role="alert"]')
-      ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    scrollToFirstError()
     return
   }
+
   submitting.value = true
   try {
-    const payload = {
-      customer: { ...form },
-      mode: billingMode.value,
+    const invoice = await createInvoice({
+      form,
       items: items.value,
-      expiry: expiry.value,
-      methods: methods.value,
-    }
-    console.log('Buat E-Invoice', payload) // TODO: kirim ke API
-
-    // TODO: ganti dengan link yang dikembalikan API setelah invoice dibuat
-    const slug =
-      form.name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '')
-        .slice(0, 20) || 'invoice'
-    invoiceUrl.value = `https://winme.id/${slug}${Math.random().toString(36).slice(2, 7)}`
-    showSuccess.value = true
+      expiresAt: expiry.value,
+      paymentMethodId: methodId.value,
+    })
+    invoiceUrl.value = invoice.url
+    showSuccess.value = true // tombol tetap nonaktif; halaman berpindah saat modal ditutup
   } catch (err) {
     submitting.value = false
-    throw err
+    if (err instanceof ApiError) {
+      submitError.value = applyServerErrors(err.errors)
+        ? 'Periksa kembali isian yang ditandai.'
+        : err.message
+    } else {
+      submitError.value = 'Tidak dapat terhubung ke server. Periksa koneksi lalu coba lagi.'
+    }
+    scrollToFirstError()
   }
 }
 
@@ -134,9 +179,7 @@ function closeSuccess() {
 
     <form class="space-y-5 px-4 pt-6" novalidate @submit.prevent="submit">
       <!-- Info panduan -->
-      <div
-        class="flex items-center gap-2.5 rounded-full bg-brand-100 px-4 py-3 text-sm text-slate-800"
-      >
+      <div class="flex items-center gap-2.5 rounded-full bg-brand-100 px-4 py-3 text-sm text-slate-800">
         <AppIcon name="info" :size="20" class="shrink-0 text-brand-500" />
         <p>
           Lihat panduan E-Invoice
@@ -200,7 +243,7 @@ function closeSuccess() {
           />
         </FormField>
 
-        <FormField id="address" label="Alamat" optional>
+        <FormField id="address" label="Alamat" optional :error="errors.address">
           <input
             id="address"
             v-model="form.address"
@@ -218,11 +261,15 @@ function closeSuccess() {
       <!-- Pengaturan E-Invoice -->
       <InvoiceSettingsSection
         v-model:expiry="expiry"
-        v-model:methods="methods"
+        v-model:method-id="methodId"
         :min="minExpiry"
         :max="maxExpiry"
         :expiry-error="errors.expiry"
         :methods-error="errors.methods"
+        :options="paymentMethods"
+        :loading="methodsLoading"
+        :load-error="methodsLoadError"
+        @retry="loadPaymentMethods"
       />
 
       <!-- Pratinjau -->
@@ -230,9 +277,17 @@ function closeSuccess() {
         :customer="form"
         :items="items"
         :expiry="expiry"
-        :channel="firstChannel"
+        :channel="channel"
         :merchant="merchant"
       />
+
+      <p
+        v-if="submitError"
+        class="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700"
+        role="alert"
+      >
+        {{ submitError }}
+      </p>
 
       <button
         type="submit"

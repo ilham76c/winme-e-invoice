@@ -1,29 +1,28 @@
 <script setup>
 import { computed, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
-import { paymentMethods } from '../constants/paymentMethods'
 
 const expiry = defineModel('expiry', { type: String, default: '' })
-const methods = defineModel('methods', { type: Array, default: () => [] })
+const methodId = defineModel('methodId', { type: Number, default: null })
 
-defineProps({
+const props = defineProps({
   min: { type: String, required: true },
   max: { type: String, required: true },
   expiryError: { type: String, default: '' },
   methodsError: { type: String, default: '' },
+  options: { type: Array, default: () => [] }, // [{ id, code, name }]
+  loading: { type: Boolean, default: false },
+  loadError: { type: String, default: '' },
 })
+const emit = defineEmits(['retry'])
 
+// Tombol "Lihat Semua Metode" hanya relevan bila metode lebih banyak dari yang ditampilkan awal
 const PREVIEW_COUNT = 8
 const showAll = ref(false)
-const visibleMethods = computed(() =>
-  showAll.value ? paymentMethods : paymentMethods.slice(0, PREVIEW_COUNT),
+const canExpand = computed(() => props.options.length > PREVIEW_COUNT)
+const visibleOptions = computed(() =>
+  showAll.value || !canExpand.value ? props.options : props.options.slice(0, PREVIEW_COUNT),
 )
-
-function toggle(id) {
-  methods.value = methods.value.includes(id)
-    ? methods.value.filter((m) => m !== id)
-    : [...methods.value, id]
-}
 </script>
 
 <template>
@@ -36,9 +35,7 @@ function toggle(id) {
       <label for="expiry" class="block text-base font-bold text-slate-900">
         Masa Berlaku Invoice <span class="text-red-500" aria-hidden="true">*</span>
       </label>
-      <p class="mt-0.5 mb-2 text-xs text-slate-400">
-        Pilih batas waktu invoice aktif (maks. 30 hari)
-      </p>
+      <p class="mt-0.5 mb-2 text-xs text-slate-400">Pilih batas waktu invoice aktif (maks. 30 hari)</p>
 
       <div class="relative">
         <input
@@ -67,6 +64,7 @@ function toggle(id) {
       <p class="mt-0.5 mb-2 text-xs text-slate-400">Pilih metode pembayaran yang tersedia</p>
 
       <button
+        v-if="canExpand"
         type="button"
         class="flex w-full items-center justify-between rounded-xl border border-slate-300 bg-white px-5 py-4 text-left transition active:scale-[0.99]"
         :aria-expanded="showAll"
@@ -84,23 +82,45 @@ function toggle(id) {
         />
       </button>
 
-      <div class="mt-3 grid grid-cols-4 gap-2">
+      <!-- Memuat -->
+      <div v-if="loading" class="mt-3 grid grid-cols-3 gap-2" aria-busy="true" aria-label="Memuat metode pembayaran">
+        <span v-for="n in 3" :key="n" class="h-10 animate-pulse rounded-lg bg-brand-100"></span>
+      </div>
+
+      <!-- Gagal memuat -->
+      <div
+        v-else-if="loadError"
+        class="mt-3 flex items-center justify-between gap-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700"
+        role="alert"
+      >
+        <span>{{ loadError }}</span>
+        <button type="button" class="shrink-0 font-semibold underline" @click="emit('retry')">
+          Coba lagi
+        </button>
+      </div>
+
+      <p v-else-if="!options.length" class="mt-3 text-sm text-slate-400">
+        Belum ada metode pembayaran yang tersedia.
+      </p>
+
+      <div v-else class="mt-3 grid grid-cols-3 gap-2" role="group" aria-label="Metode pembayaran">
         <button
-          v-for="m in visibleMethods"
+          v-for="m in visibleOptions"
           :key="m.id"
           type="button"
-          :aria-pressed="methods.includes(m.id)"
-          class="truncate rounded-lg px-1 py-2.5 text-sm font-medium transition active:scale-95"
+          :aria-pressed="methodId === m.id"
+          class="rounded-lg px-2 py-2.5 text-center text-sm leading-tight font-medium break-words transition active:scale-95"
           :class="
-            methods.includes(m.id)
+            methodId === m.id
               ? 'bg-brand-500 text-white'
               : 'bg-brand-100 text-brand-600 hover:bg-brand-200'
           "
-          @click="toggle(m.id)"
+          @click="methodId = m.id"
         >
-          {{ m.label }}
+          {{ m.name }}
         </button>
       </div>
+
       <p v-if="methodsError" class="mt-2 text-xs text-red-600" role="alert">{{ methodsError }}</p>
     </div>
   </section>
